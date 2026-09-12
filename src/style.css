@@ -1,0 +1,541 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #0b2545;
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+/* ---------- 统一焦点样式：键盘/读屏可见，鼠标点击不刺眼 ---------- */
+
+#panelToggle:focus-visible,
+#panel button:focus-visible,
+#panel input[type='range']:focus-visible,
+.dialog button:focus-visible,
+.song-open:focus-visible {
+  outline: 3px solid #1565c0;
+  outline-offset: 2px;
+}
+
+#panel button.weather.active:focus-visible {
+  outline-color: #0d47a1;
+}
+
+#panelToggle:active {
+  transform: scale(0.94);
+}
+
+/* ---------- 左上进度 ---------- */
+
+#hud {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 12px;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #0b2545;
+  pointer-events: none;
+}
+
+/* ---------- 面板开关 ---------- */
+
+#panelToggle {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: 12px;
+  z-index: 12;
+  font-size: 24px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+
+#panelToggle[aria-expanded='true'] {
+  background: #1e88e5;
+}
+
+/* ---------- 家长面板 ---------- */
+
+#panel {
+  position: fixed;
+  top: calc(74px + env(safe-area-inset-top, 0px));
+  right: 12px;
+  z-index: 11;
+  width: min(300px, calc(100vw - 24px));
+  max-height: calc(100vh - 96px - env(safe-area-inset-top, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 18px;
+  padding: 14px 16px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+#panel.hidden {
+  transform: translateY(-12px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+#panel .group {
+  margin-bottom: 12px;
+}
+
+#panel .label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+#panel label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #234;
+}
+
+/* 实时数值提示 */
+#panel .readout {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0d47a1;
+  background: #e3f2fd;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#panel input[type='range'] {
+  width: 100%;
+  /* 触控热区不低于 40px，拇指更容易抓住 */
+  height: 40px;
+  margin: 0;
+  accent-color: #1e88e5;
+  cursor: pointer;
+}
+
+#panel .row {
+  display: flex;
+  gap: 8px;
+}
+
+#panel button {
+  flex: 1;
+  font-size: 20px;
+  /* 最小点击区域 44×44（移动端无障碍推荐尺寸） */
+  min-height: 44px;
+  padding: 10px 8px;
+  border: none;
+  border-radius: 12px;
+  background: #e3f2fd;
+  color: #123;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+@media (hover: hover) {
+  #panel button:hover {
+    background: #bbdefb;
+  }
+}
+
+#panel button:active {
+  transform: scale(0.97);
+}
+
+/* 天气按钮：选中态用填充色而非仅描边，对比度更高 */
+#panel button.weather {
+  flex: 0 0 auto;
+  width: 52px;
+  font-size: 22px;
+}
+
+#panel button.weather.active {
+  background: #1e88e5;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+
+/* 静音状态：按钮自身也呈现“已静音”的可读样式 */
+#mute[aria-pressed='true'] {
+  background: #cfd8dc;
+}
+
+#mic.recording {
+  background: #ef5350;
+  color: #fff;
+  animation: pulse 1s infinite;
+}
+
+/* ---------- 本地作品集 ---------- */
+
+#panel .portfolio {
+  border-top: 1px dashed #b0c4d8;
+  padding-top: 10px;
+}
+
+#panel .portfolio-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #234;
+}
+
+#currentSong {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panel button.primary {
+  background: #1e88e5;
+  color: #fff;
+  font-weight: 700;
+}
+
+@media (hover: hover) {
+  #panel button.primary:hover {
+    background: #1976d2;
+  }
+}
+
+#saveAsSong[hidden] {
+  display: none;
+}
+
+#saveAsSong {
+  flex: 0 0 auto;
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.song-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.song-item {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.song-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 8px 12px;
+  background: #f2f7fc;
+  border: 1px solid #d4e4f2;
+  border-radius: 12px;
+}
+
+.song-item.current .song-open {
+  background: #e3f2fd;
+  border-color: #90caf9;
+  box-shadow: inset 0 0 0 1px #64b5f6;
+}
+
+.song-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.song-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #123;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-meta {
+  font-size: 12px;
+  color: #5a7186;
+  font-variant-numeric: tabular-nums;
+}
+
+.song-delete {
+  flex: 0 0 auto;
+  width: 48px;
+  min-height: 44px;
+  font-size: 17px;
+  padding: 6px;
+  background: #fbe9e7;
+  color: #b71c1c;
+}
+
+@media (hover: hover) {
+  .song-delete:hover {
+    background: #ffccbc;
+  }
+  .song-delete.confirm:hover {
+    background: #c62828;
+  }
+}
+
+.song-delete.confirm {
+  width: auto;
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 700;
+  background: #e53935;
+  color: #fff;
+  animation: pulse 1s infinite;
+}
+
+#songListEmpty {
+  margin-top: 6px;
+}
+
+#songListEmpty[hidden] {
+  display: none;
+}
+
+/* ---------- 命名对话框 ---------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 25, 50, 0.55);
+  padding: 24px;
+}
+
+.dialog-backdrop.hidden {
+  display: none;
+}
+
+.dialog {
+  width: min(340px, 92vw);
+  background: #fff;
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.dialog h2 {
+  margin: 0 0 14px;
+  font-size: 17px;
+  color: #123;
+}
+
+.dialog input[type='text'] {
+  width: 100%;
+  font-size: 16px; /* ≥16px 避免 iOS 聚焦时自动放大页面 */
+  padding: 12px 14px;
+  border: 2px solid #b0c4d8;
+  border-radius: 12px;
+  color: #123;
+  background: #f8fbfe;
+}
+
+.dialog input[type='text']:focus {
+  outline: none;
+  border-color: #1e88e5;
+}
+
+.dialog-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.dialog-row button {
+  flex: 1;
+  min-height: 44px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  background: #e3f2fd;
+  color: #123;
+  cursor: pointer;
+}
+
+.dialog-row button.primary {
+  background: #1e88e5;
+  color: #fff;
+}
+
+#panel .tip {
+  font-size: 12px;
+  color: #456;
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+
+/* ---------- 反馈提示：默认贴近底部，避开河面/顶部圆圈拖拽区 ---------- */
+
+#toast {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  transform: translate(-50%, 10px);
+  z-index: 20;
+  max-width: min(90vw, 420px);
+  text-align: center;
+  background: rgba(20, 40, 70, 0.88);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.5;
+  padding: 10px 20px;
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+  white-space: normal;
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* 反馈出现时弱化底部说明，避免两行文字叠在一起抢视线 */
+#toast.show ~ #hint {
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+#hint {
+  position: fixed;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: 92vw;
+  text-align: center;
+  background: rgba(10, 30, 60, 0.45);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 14px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* ---------- 窄屏：面板改为底部抽屉，让出整个河面拖拽区 ---------- */
+
+@media (max-width: 600px) {
+  #hud {
+    font-size: 16px;
+    padding: 6px 12px;
+  }
+
+  #panelToggle {
+    width: 48px;
+    height: 48px;
+    font-size: 22px;
+  }
+
+  #panel {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-height: min(62vh, 460px);
+    padding: 12px 14px;
+    border-radius: 20px;
+  }
+
+  #panel.hidden {
+    transform: translateY(calc(100% + 24px));
+  }
+
+  #panel .group {
+    margin-bottom: 10px;
+  }
+
+  #panel label {
+    font-size: 15px;
+  }
+
+  #mic {
+    font-size: 15px;
+    letter-spacing: 0.02em;
+  }
+
+  #panel .tip {
+    font-size: 12.5px;
+  }
+
+  #hint {
+    font-size: 12.5px;
+    padding: 6px 12px;
+  }
+
+  /* 面板（底部抽屉）打开时，反馈移到顶部圆圈带下方，不遮挡抽屉也不挡河面 */
+  #panel:not(.hidden) ~ #toast {
+    bottom: auto;
+    top: calc(120px + env(safe-area-inset-top, 0px));
+    transform: translate(-50%, 10px);
+  }
+
+  #panel:not(.hidden) ~ #toast.show {
+    transform: translate(-50%, 0);
+  }
+}
+
+/* 横屏矮窗口：抽屉限高可滚动，避免盖住整个河面 */
+@media (max-width: 900px) and (max-height: 480px) {
+  #panel {
+    max-height: 58vh;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #panel,
+  #panelToggle,
+  #toast,
+  #mic.recording {
+    transition: none;
+    animation: none;
+  }
+}

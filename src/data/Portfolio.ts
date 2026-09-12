@@ -1,0 +1,258 @@
+import type { Timbre, WeatherKind } from '../audio/AudioEngine';
+
+/** 格子数量（与 Game.SLOT_COUNT 对应，存档独立保存以校验） */
+export interface SongDoc {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  flow: number; // 流速 0~1
+  level: number; // 水位 0~1
+  weather: WeatherKind;
+  slotCount: number;
+  /** 格子顺序：每格放的是哪块碎片，null 表示空格 */
+  slots: (string | null)[];
+  /** 河里所有碎片（不在格子里的也保存，避免丢失录音） */
+  fragments: FragmentDoc[];
+  version: 1;
+}
+
+export interface FragmentDoc {
+  id: string;
+  kind: 'tone' | 'voice';
+  freq: number;
+  timbre: Timbre;
+  color: string;
+  label: string;
+  /** tone 碎片在固定音阶中的序号，重新打开时据此恢复波形；voice 为 -1 */
+  toneIndex: number;
+  /** 仅 voice：原始录音的 base64（webm/opus 或 mp4），声音波形也从中恢复 */
+  audio?: string;
+  audioMime?: string;
+}
+
+export interface SongSummary {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  weather: WeatherKind;
+  voiceCount: number;
+}
+
+const STORAGE_KEY = 'river-songs-v1';
+const DOC_VERSION = 1 as const;
+/**
+ * localStorage 常见每源上限约 5MB，留余量给其它数据。
+ * 注意单位是 UTF-8 字节，不是字符串的 length（UTF-16 码元数）：
+ * 作品名里的中文每字占 3 字节、emoji 占 4 字节，按 length 估算会偏小。
+ */
+const MAX_TOTAL_BYTES = 4_500_000;
+
+const utf8Encoder = new TextEncoder();
+
+/** 字符串写入 localStorage 后占用的实际字节数（按 UTF-8 编码） */
+export function utf8ByteSize(s: string): number {
+  return utf8Encoder.encode(s).length;
+}
+
+/* ---------- base64：二进制录音 ↔ 字符串（DataURL 拆包，不走 atob 的中文坑） ---------- */
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+export function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/* ---------- 存档读取与校验 ----------
+ * localStorage 可能被旧版本、手动编辑、写入中断等污染：顶层不是数组、
+ * 条目缺字段、fragments 缺失/不是数组/混入 null、时间戳是字符串等。
+ * 必须在读取边界逐条规范化，否则 list() 里 d.fragments.filter(...) 会抛
+ * TypeError，而列表在应用启动（p5 setup）时就要渲染，整个装置会白屏崩溃。
+ */
+
+const WEATHERS: readonly WeatherKind[] = ['sunny', 'rain', 'wind'];
+const TIMBRES: readonly Timbre[] = ['sine', 'triangle', 'square', 'sample'];
+const TONE_COUNT = 8; // Game 中固定音阶长度
+const MAX_SLOT_COUNT = 64;
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const asNum = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+/** 0~1 的滑块值：越界截断，非数字用默认值 */
+const asUnit = (v: unknown, fallback: number): number => {
+  const n = asNum(v, fallback);
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+};
+
+/** 时间戳：必须是正数，无法解析时回落到当前时间，保证排序不出 NaN */
+const asTimestamp = (v: unknown): number => {
+  const n = asNum(v, NaN);
+  return n > 0 ? n : Date.now();
+};
+
+const normalizeFragment = (raw: unknown): FragmentDoc | null => {
+  if (!isRecord(raw)) return null;
+  if (typeof raw.id !== 'string' || raw.id === '') return null;
+
+  const kind = raw.kind === 'voice' ? 'voice' : raw.kind === 'tone' ? 'tone' : null;
+  if (!kind) return null;
+
+  const toneIndex = asNum(raw.toneIndex, -1);
+  // 内置音符若音阶序号越界则丢弃（恢复时会按音阶表自动补齐）
+  if (kind === 'tone' && (toneIndex < 0 || toneIndex >= TONE_COUNT)) return null;
+  // 录音碎片若音频载荷不是非空字符串，没有任何可恢复内容，丢弃
+  if (kind === 'voice' && !(typeof raw.audio === 'string' && raw.audio.length > 0)) return null;
+
+  const timbreRaw = raw.timbre;
+  const timbre: Timbre = TIMBRES.includes(timbreRaw as Timbre)
+    ? (timbreRaw as Timbre)
+    : kind === 'voice'
+      ? 'sample'
+      : 'sine';
+
+  return {
+    id: raw.id,
+    kind,
+    freq: asNum(raw.freq, 261.63),
+    timbre,
+    color: typeof raw.color === 'string' ? raw.color : '',
+    label: typeof raw.label === 'string' ? raw.label : '',
+    toneIndex,
+    ...(kind === 'voice'
+      ? { audio: raw.audio as string, audioMime: typeof raw.audioMime === 'string' ? raw.audioMime : 'audio/webm' }
+      : {}),
+  };
+};
+
+const normalizeDoc = (raw: unknown): SongDoc | null => {
+  if (!isRecord(raw)) return null;
+  if (typeof raw.id !== 'string' || raw.id === '') return null;
+  if (typeof raw.name !== 'string' || raw.name.trim() === '') return null;
+
+  const fragsRaw = Array.isArray(raw.fragments) ? raw.fragments : [];
+  const fragments = fragsRaw.map(normalizeFragment).filter((f): f is FragmentDoc => f !== null);
+
+  const slotsRaw = Array.isArray(raw.slots) ? raw.slots : [];
+  const slots: (string | null)[] = slotsRaw.map((s) =>
+    typeof s === 'string' && s !== '' ? s : null
+  );
+
+  const slotCountRaw = asNum(raw.slotCount, slots.length);
+  const slotCount = Math.max(0, Math.min(MAX_SLOT_COUNT, Math.round(slotCountRaw)));
+  if (slots.length < slotCount) slots.push(...Array(slotCount - slots.length).fill(null));
+  else if (slots.length > slotCount) slots.length = slotCount;
+
+  const weatherRaw = raw.weather;
+  const weather: WeatherKind = WEATHERS.includes(weatherRaw as WeatherKind)
+    ? (weatherRaw as WeatherKind)
+    : 'sunny';
+
+  return {
+    id: raw.id,
+    name: raw.name,
+    createdAt: asTimestamp(raw.createdAt),
+    updatedAt: asTimestamp(raw.updatedAt),
+    flow: asUnit(raw.flow, 0.4),
+    level: asUnit(raw.level, 0.5),
+    weather,
+    slotCount,
+    slots,
+    fragments,
+    version: 1,
+  };
+};
+
+function readStore(): SongDoc[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // 逐条校验：单条损坏只丢该条，不影响其余作品，更不能让整站启动失败
+    return parsed.map(normalizeDoc).filter((d): d is SongDoc => d !== null);
+  } catch {
+    return [];
+  }
+}
+
+function writeStore(docs: SongDoc[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+}
+
+export class Portfolio {
+  /** 作品集列表（按最近修改倒序） */
+  list(): SongSummary[] {
+    return readStore()
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        createdAt: d.createdAt,
+        updatedAt: d.updatedAt,
+        weather: d.weather,
+        voiceCount: d.fragments.filter((f) => f.kind === 'voice').length,
+      }))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  get(id: string): SongDoc | null {
+    return readStore().find((d) => d.id === id) ?? null;
+  }
+
+  /** 新建或覆盖同名 id 的作品；空间不足时抛 QuotaError */
+  save(doc: Omit<SongDoc, 'version'>): SongDoc {
+    const full: SongDoc = { ...doc, version: DOC_VERSION };
+    const docs = readStore();
+    const i = docs.findIndex((d) => d.id === full.id);
+    if (i >= 0) docs[i] = full;
+    else docs.unshift(full);
+
+    const json = JSON.stringify(docs);
+    // 浏览器按 UTF-8 字节计算 localStorage 配额，不能用 json.length（UTF-16 码元）：
+    // 中文名/emoji 与接近上限的录音会让实际占用明显大于字符数，预检会误放行。
+    const bytes = utf8ByteSize(json);
+    if (bytes > MAX_TOTAL_BYTES) {
+      throw new QuotaError(`作品集空间快满了（约 ${(bytes / 1_000_000).toFixed(1)}MB），先删掉一些旧作品再存`);
+    }
+    try {
+      writeStore(docs);
+    } catch (e) {
+      // 预检通过仍可能失败：这台设备/浏览器的实际配额更小，或已被同域其它数据占用
+      throw new QuotaError('存不下啦：录音太多，浏览器本地空间不足', e);
+    }
+    return full;
+  }
+
+  remove(id: string): void {
+    writeStore(readStore().filter((d) => d.id !== id));
+  }
+
+  /** 新建作品的唯一 id（时间戳 + 随机串，不依赖 crypto） */
+  static newId(): string {
+    return `song-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+}
+
+/** 本地空间不足（或浏览器拒绝写入），供 UI 给出明确提示 */
+export class QuotaError extends Error {
+  constructor(
+    message: string,
+    readonly cause?: unknown
+  ) {
+    super(message);
+    this.name = 'QuotaError';
+  }
+}

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>河流声音地图 · 亲子互动装置</title>
+  </head>
+  <body>
+    <div id="hud">🎵 <span id="noteCount">0</span>/<span id="noteTotal">6</span></div>
+    <button
+      id="panelToggle"
+      type="button"
+      aria-label="打开家长面板"
+      aria-expanded="false"
+      aria-controls="panel"
+      title="家长面板"
+    >
+      🎛️
+    </button>
+
+    <div id="panel" class="hidden" role="region" aria-label="家长控制面板">
+      <div class="group">
+        <div class="label-row">
+          <label for="flow">🌊 水流速度</label>
+          <output id="flowVal" for="flow" class="readout">0.8 m/s</output>
+        </div>
+        <input id="flow" type="range" min="0" max="100" value="40" />
+      </div>
+      <div class="group">
+        <div class="label-row">
+          <label for="level">💧 水位高低</label>
+          <output id="levelVal" for="level" class="readout">50 cm</output>
+        </div>
+        <input id="level" type="range" min="0" max="100" value="50" />
+      </div>
+      <div class="group row" role="group" aria-label="天气选择">
+        <button
+          type="button"
+          class="weather active"
+          data-weather="sunny"
+          aria-pressed="true"
+          aria-label="晴天"
+          title="晴天"
+        >
+          ☀️
+        </button>
+        <button
+          type="button"
+          class="weather"
+          data-weather="rain"
+          aria-pressed="false"
+          aria-label="雨天"
+          title="雨天"
+        >
+          🌧️
+        </button>
+        <button
+          type="button"
+          class="weather"
+          data-weather="wind"
+          aria-pressed="false"
+          aria-label="风天"
+          title="风天"
+        >
+          💨
+        </button>
+      </div>
+      <div class="group row">
+        <button id="mic" type="button" aria-pressed="false" aria-label="录一段声音">
+          🎙️ 录一段声音
+        </button>
+        <button
+          id="mute"
+          type="button"
+          aria-pressed="false"
+          aria-label="静音"
+          title="静音"
+        >
+          🔊
+        </button>
+      </div>
+
+      <div class="group portfolio" role="group" aria-label="本地作品集">
+        <div class="label-row">
+          <span class="portfolio-title">📚 河流之歌作品集</span>
+          <span id="currentSong" class="readout" hidden></span>
+        </div>
+        <div class="row">
+          <button id="saveSong" type="button" class="primary">💾 保存这首歌</button>
+          <button id="saveAsSong" type="button" hidden>另存为新歌</button>
+        </div>
+        <ul id="songList" class="song-list" aria-label="已保存的河流之歌"></ul>
+        <p id="songListEmpty" class="tip">还没有保存过作品：给孩子拼好的歌起个名字，点「保存这首歌」吧。</p>
+      </div>
+
+      <p class="tip">
+        孩子玩法：把河里的声波碎片拖进上面的圆圈，拼出河流的歌；调高水位，找找被淹没的
+        ♪。录音需要麦克风权限。作品只保存在这台设备上。
+      </p>
+    </div>
+
+    <!-- 命名 / 另存对话框 -->
+    <div id="songDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="songDialogTitle">
+      <form id="songDialogForm" class="dialog">
+        <h2 id="songDialogTitle">给河流之歌起个名字</h2>
+        <input
+          id="songNameInput"
+          type="text"
+          maxlength="24"
+          placeholder="例如：小雨的早晨"
+          autocomplete="off"
+          aria-label="歌曲名字"
+        />
+        <div class="dialog-row">
+          <button type="button" id="songDialogCancel">取消</button>
+          <button type="submit" id="songDialogOk" class="primary">保存</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="toast" role="status"></div>
+    <div id="hint">把河里的声波碎片拖进上面的圆圈 ♪ 调节水位，寻找被淹没的音符</div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
