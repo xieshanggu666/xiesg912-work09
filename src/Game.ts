@@ -10,7 +10,7 @@ import { Weather } from './world/Weather';
 import { Panel } from './ui/Panel';
 import { Portfolio } from './data/Portfolio';
 import type { FragmentDoc, SongDoc } from './data/Portfolio';
-import { bytesToBase64, base64ToBytes, QuotaError } from './data/Portfolio';
+import { bytesToBase64, base64ToBytes, QuotaError, ImportError } from './data/Portfolio';
 
 const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25];
 const SOLFEGE = ['do', 're', 'mi', 'sol', 'la', 'do', 're', 'mi'];
@@ -119,6 +119,8 @@ export class Game {
       onSaveSong: (name, asNew) => this.saveSong(name, asNew),
       onOpenSong: (id) => void this.openSong(id),
       onDeleteSong: (id) => this.deleteSong(id),
+      onExportSong: (id) => this.exportSong(id),
+      onImportSong: (file) => void this.importSong(file),
     });
     this.panel.setNotes(0, SLOT_COUNT);
     this.refreshSongList();
@@ -573,6 +575,57 @@ export class Game {
     if (this.currentSongId === id) this.currentSongId = null;
     this.refreshSongList();
     this.panel.toast('已删除 🗑️');
+  }
+
+  /** 单首作品备份文件的大小上限：单首（含若干段 4 秒录音）远超此值即可判定为选错文件 */
+  private static MAX_IMPORT_BYTES = 8_000_000;
+
+  /** 导出单首作品为 .json 备份文件，家长可发到另一台设备再导入 */
+  private exportSong(id: string): void {
+    const exported = this.portfolio.exportSong(id);
+    if (!exported) {
+      this.refreshSongList();
+      return;
+    }
+    // 文件名沿用作品名，只替换掉各平台文件系统不接受的字符
+    const safe = exported.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim() || '河流之歌';
+    const url = URL.createObjectURL(new Blob([exported.json], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safe}.river-song.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // 延后回收：iOS Safari 立即 revoke 会取消还没开始的下载
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    this.panel.toast(`已导出《${exported.name}》📤 发到另一台设备后点「导入作品备份」`);
+  }
+
+  /** 从备份文件导入一首作品；只进列表不自动打开，避免覆盖孩子正在玩的河流 */
+  private async importSong(file: File): Promise<void> {
+    if (file.size > Game.MAX_IMPORT_BYTES) {
+      this.panel.toast('这个文件太大，不像是作品备份 🤔');
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      this.panel.toast('读不了这个文件 😢');
+      return;
+    }
+    try {
+      const { doc, copied } = this.portfolio.importSong(text);
+      this.refreshSongList();
+      this.panel.toast(
+        copied
+          ? `已导入《${doc.name}》：本机已有同一首，存成了新作品 📥`
+          : `《${doc.name}》回到作品集啦！📥`
+      );
+    } catch (e) {
+      if (e instanceof ImportError || e instanceof QuotaError) this.panel.toast(e.message);
+      else this.panel.toast('导入失败 😢 这个文件可能不是作品备份');
+    }
   }
 
   /** 按存档重建整条河流：还原因速/水位 → 清场 → 建碎片 → 摆格子 → 天气 */

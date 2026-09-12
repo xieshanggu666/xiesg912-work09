@@ -234,6 +234,19 @@ canvas {
   padding: 10px 12px;
 }
 
+/* 导入备份：低调的次级按钮，不抢「保存」的主操作位 */
+#importSong {
+  font-size: 14px;
+  background: #f2f7fc;
+  border: 1px solid #d4e4f2;
+}
+
+@media (hover: hover) {
+  #importSong:hover {
+    background: #e3f2fd;
+  }
+}
+
 .song-list {
   list-style: none;
   margin: 8px 0 0;
@@ -285,6 +298,22 @@ canvas {
   font-size: 12px;
   color: #5a7186;
   font-variant-numeric: tabular-nums;
+}
+
+.song-export {
+  flex: 0 0 auto;
+  width: 48px;
+  min-height: 44px;
+  font-size: 17px;
+  padding: 6px;
+  background: #e3f2fd;
+  color: #0d47a1;
+}
+
+@media (hover: hover) {
+  .song-export:hover {
+    background: #bbdefb;
+  }
 }
 
 .song-delete {

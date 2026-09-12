@@ -12,6 +12,10 @@ export interface PanelCallbacks {
   onSaveSong: (name: string, asNew: boolean) => void;
   onOpenSong: (id: string) => void;
   onDeleteSong: (id: string) => void;
+  /** 导出单首作品为备份文件 */
+  onExportSong: (id: string) => void;
+  /** 从备份文件导入一首作品 */
+  onImportSong: (file: File) => void;
 }
 
 const WEATHER_ICON: Record<WeatherKind, string> = { sunny: '☀️', rain: '🌧️', wind: '💨' };
@@ -32,6 +36,7 @@ export class Panel {
   private currentSong: HTMLOutputElement;
   private songList: HTMLUListElement;
   private songListEmpty: HTMLElement;
+  private importInput: HTMLInputElement;
 
   private dialog: HTMLElement;
   private nameInput: HTMLInputElement;
@@ -89,6 +94,15 @@ export class Panel {
 
     el<HTMLButtonElement>('saveSong').addEventListener('click', () => this.openDialog('save'));
     this.saveAsBtn.addEventListener('click', () => this.openDialog('saveAs'));
+
+    // 导入：按钮转发到隐藏的文件选择框；选完清空 value，下次选同一文件仍能触发 change
+    this.importInput = el<HTMLInputElement>('importFile');
+    el<HTMLButtonElement>('importSong').addEventListener('click', () => this.importInput.click());
+    this.importInput.addEventListener('change', () => {
+      const file = this.importInput.files?.[0] ?? null;
+      this.importInput.value = '';
+      if (file) this.cb.onImportSong(file);
+    });
 
     this.dialog = el('songDialog');
     this.nameInput = el<HTMLInputElement>('songNameInput');
@@ -190,6 +204,14 @@ export class Panel {
     openBtn.append(head);
     openBtn.addEventListener('click', () => this.cb.onOpenSong(s.id));
 
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'song-export';
+    exportBtn.setAttribute('aria-label', `导出《${s.name}》备份`);
+    exportBtn.title = '导出为备份文件，可在另一台设备导入';
+    exportBtn.textContent = '📤';
+    exportBtn.addEventListener('click', () => this.cb.onExportSong(s.id));
+
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'song-delete';
@@ -208,7 +230,7 @@ export class Panel {
       this.cb.onDeleteSong(s.id);
     });
 
-    li.append(openBtn, delBtn);
+    li.append(openBtn, exportBtn, delBtn);
     return li;
   }
 

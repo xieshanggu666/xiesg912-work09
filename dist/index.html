@@ -7,8 +7,8 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>河流声音地图 · 亲子互动装置</title>
-    <script type="module" crossorigin src="./assets/index-apslzjzL.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-fME8IuEs.css">
+    <script type="module" crossorigin src="./assets/index-BxWvfxfC.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Bg7wnuzl.css">
   </head>
   <body>
     <div id="hud">🎵 <span id="noteCount">0</span>/<span id="noteTotal">6</span></div>
@@ -94,13 +94,17 @@
           <button id="saveSong" type="button" class="primary">💾 保存这首歌</button>
           <button id="saveAsSong" type="button" hidden>另存为新歌</button>
         </div>
+        <div class="row">
+          <button id="importSong" type="button">📥 导入作品备份</button>
+          <input id="importFile" type="file" accept=".json,application/json" hidden />
+        </div>
         <ul id="songList" class="song-list" aria-label="已保存的河流之歌"></ul>
         <p id="songListEmpty" class="tip">还没有保存过作品：给孩子拼好的歌起个名字，点「保存这首歌」吧。</p>
       </div>
 
       <p class="tip">
         孩子玩法：把河里的声波碎片拖进上面的圆圈，拼出河流的歌；调高水位，找找被淹没的
-        ♪。录音需要麦克风权限。作品只保存在这台设备上。
+        ♪。录音需要麦克风权限。作品只保存在这台设备上；点作品旁的 📤 导出备份文件，就能在另一台设备上「导入」继续编辑。
       </p>
     </div>
 

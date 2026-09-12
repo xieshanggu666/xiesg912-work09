@@ -193,6 +193,23 @@ function writeStore(docs: SongDoc[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
 }
 
+/** 配额预检 + 写入（save 与 importSong 共用，保证两处行为一致） */
+function persistStore(docs: SongDoc[]): void {
+  const json = JSON.stringify(docs);
+  // 浏览器按 UTF-8 字节计算 localStorage 配额，不能用 json.length（UTF-16 码元）：
+  // 中文名/emoji 与接近上限的录音会让实际占用明显大于字符数，预检会误放行。
+  const bytes = utf8ByteSize(json);
+  if (bytes > MAX_TOTAL_BYTES) {
+    throw new QuotaError(`作品集空间快满了（约 ${(bytes / 1_000_000).toFixed(1)}MB），先删掉一些旧作品再存`);
+  }
+  try {
+    writeStore(docs);
+  } catch (e) {
+    // 预检通过仍可能失败：这台设备/浏览器的实际配额更小，或已被同域其它数据占用
+    throw new QuotaError('存不下啦：录音太多，浏览器本地空间不足', e);
+  }
+}
+
 export class Portfolio {
   /** 作品集列表（按最近修改倒序） */
   list(): SongSummary[] {
@@ -219,21 +236,42 @@ export class Portfolio {
     const i = docs.findIndex((d) => d.id === full.id);
     if (i >= 0) docs[i] = full;
     else docs.unshift(full);
-
-    const json = JSON.stringify(docs);
-    // 浏览器按 UTF-8 字节计算 localStorage 配额，不能用 json.length（UTF-16 码元）：
-    // 中文名/emoji 与接近上限的录音会让实际占用明显大于字符数，预检会误放行。
-    const bytes = utf8ByteSize(json);
-    if (bytes > MAX_TOTAL_BYTES) {
-      throw new QuotaError(`作品集空间快满了（约 ${(bytes / 1_000_000).toFixed(1)}MB），先删掉一些旧作品再存`);
-    }
-    try {
-      writeStore(docs);
-    } catch (e) {
-      // 预检通过仍可能失败：这台设备/浏览器的实际配额更小，或已被同域其它数据占用
-      throw new QuotaError('存不下啦：录音太多，浏览器本地空间不足', e);
-    }
+    persistStore(docs);
     return full;
+  }
+
+  /** 导出单首作品为 JSON 文本（即存档结构本身），不存在时返回 null */
+  exportSong(id: string): { name: string; json: string } | null {
+    const doc = this.get(id);
+    if (!doc) return null;
+    return { name: doc.name, json: JSON.stringify(doc) };
+  }
+
+  /**
+   * 从 JSON 文本导入单首作品（exportSong 的逆操作，复用同一存档结构与校验）。
+   * id 与本机已有作品冲突时生成新 id 存为副本，绝不静默覆盖本机作品。
+   * 文件无法识别时抛 ImportError，空间不足时抛 QuotaError。
+   */
+  importSong(text: string): { doc: SongDoc; copied: boolean } {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new ImportError('这个文件不是有效的作品备份');
+    }
+    // 与 readStore 相同的逐条规范化：字段缺失/类型错误在这里被拦下或修复
+    const doc = normalizeDoc(parsed);
+    if (!doc) throw new ImportError('文件里没有能识别的河流之歌');
+
+    const docs = readStore();
+    let copied = false;
+    if (docs.some((d) => d.id === doc.id)) {
+      doc.id = Portfolio.newId();
+      copied = true;
+    }
+    docs.unshift(doc);
+    persistStore(docs);
+    return { doc, copied };
   }
 
   remove(id: string): void {
@@ -254,5 +292,13 @@ export class QuotaError extends Error {
   ) {
     super(message);
     this.name = 'QuotaError';
+  }
+}
+
+/** 导入的文件不是可识别的作品备份（非 JSON，或缺少存档必需字段） */
+export class ImportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImportError';
   }
 }
