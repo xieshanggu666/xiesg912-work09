@@ -176,6 +176,120 @@ const normalizeDoc = (raw: unknown): SongDoc | null => {
   };
 };
 
+/* ---------- 导入备份的严格校验 ----------
+ * 与 normalizeDoc 相反：备份文件由 exportSong 机器生成，本就该完整自洽。
+ * 字段缺失、类型/取值越界、格子引用悬空都说明它不是（或已损坏的）备份，
+ * 必须整体拒绝——若沿用读取本地存档的宽容补缺逻辑，任何只含 id 和 name
+ * 的普通 JSON 都会被补成空歌收进作品集。
+ * 校验的是「exportSong 确实会写出的不变量」，不禁止多余的未知字段（向前兼容）。
+ */
+
+const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** 0~1 的滑块值（严格版：越界即无效，不截断） */
+const isUnitNum = (v: unknown): v is number => isFiniteNum(v) && v >= 0 && v <= 1;
+
+/** 正数时间戳（严格版：不合法即无效，不回落到当前时间） */
+const isPositiveTs = (v: unknown): v is number => isFiniteNum(v) && v > 0;
+
+/** bytesToBase64 产出的标准 base64（含结尾 padding），用于发现截断/手改过的录音 */
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+const strictFragment = (raw: unknown): FragmentDoc | null => {
+  if (!isRecord(raw)) return null;
+  if (typeof raw.id !== 'string' || raw.id === '') return null;
+
+  const kind = raw.kind === 'voice' ? 'voice' : raw.kind === 'tone' ? 'tone' : null;
+  if (!kind) return null;
+
+  if (!isFiniteNum(raw.freq) || raw.freq <= 0) return null;
+  if (!TIMBRES.includes(raw.timbre as Timbre)) return null;
+  if (typeof raw.color !== 'string' || typeof raw.label !== 'string') return null;
+  if (typeof raw.toneIndex !== 'number' || !Number.isInteger(raw.toneIndex)) return null;
+
+  if (kind === 'tone') {
+    if (raw.toneIndex < 0 || raw.toneIndex >= TONE_COUNT) return null;
+    return {
+      id: raw.id,
+      kind,
+      freq: raw.freq,
+      timbre: raw.timbre as Timbre,
+      color: raw.color,
+      label: raw.label,
+      toneIndex: raw.toneIndex,
+    };
+  }
+
+  // voice：录音是备份的核心内容，必须存在且是形态合法的 base64
+  if (raw.toneIndex !== -1) return null;
+  if (typeof raw.audio !== 'string' || raw.audio.length === 0) return null;
+  if (raw.audio.length % 4 !== 0 || !BASE64_RE.test(raw.audio)) return null;
+  if (typeof raw.audioMime !== 'string' || raw.audioMime === '') return null;
+  return {
+    id: raw.id,
+    kind,
+    freq: raw.freq,
+    timbre: raw.timbre as Timbre,
+    color: raw.color,
+    label: raw.label,
+    toneIndex: -1,
+    audio: raw.audio,
+    audioMime: raw.audioMime,
+  };
+};
+
+/** 严格解析备份文件：任何一项不满足都返回 null，由调用方统一报错 */
+const parseBackupDoc = (raw: unknown): SongDoc | null => {
+  if (!isRecord(raw)) return null;
+  // 版本标识是备份文件的格式声明；不是本应用写出的 version: 1 一律不认
+  if (raw.version !== DOC_VERSION) return null;
+  if (typeof raw.id !== 'string' || raw.id === '') return null;
+  if (typeof raw.name !== 'string' || raw.name.trim() === '') return null;
+  if (!isPositiveTs(raw.createdAt) || !isPositiveTs(raw.updatedAt)) return null;
+  if (!isUnitNum(raw.flow) || !isUnitNum(raw.level)) return null;
+  if (!WEATHERS.includes(raw.weather as WeatherKind)) return null;
+  if (
+    typeof raw.slotCount !== 'number' ||
+    !Number.isInteger(raw.slotCount) ||
+    raw.slotCount < 1 ||
+    raw.slotCount > MAX_SLOT_COUNT
+  ) {
+    return null;
+  }
+  // 格子编排是歌曲数据本体：必须存在、长度与 slotCount 一致、每项是空格或碎片 id
+  if (!Array.isArray(raw.slots) || raw.slots.length !== raw.slotCount) return null;
+  if (!raw.slots.every((s) => s === null || (typeof s === 'string' && s !== ''))) return null;
+  // 碎片列表必须非空（河里始终有 8 块内置音符，真备份不可能为空）且逐块严格有效
+  if (!Array.isArray(raw.fragments) || raw.fragments.length === 0) return null;
+
+  const fragments: FragmentDoc[] = [];
+  const fragIds = new Set<string>();
+  for (const f of raw.fragments) {
+    const frag = strictFragment(f);
+    if (!frag || fragIds.has(frag.id)) return null;
+    fragIds.add(frag.id);
+    fragments.push(frag);
+  }
+  // 格子引用的碎片必须真实存在（导出文件的基本不变量）
+  for (const s of raw.slots) {
+    if (s !== null && !fragIds.has(s)) return null;
+  }
+
+  return {
+    id: raw.id,
+    name: raw.name,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    flow: raw.flow,
+    level: raw.level,
+    weather: raw.weather as WeatherKind,
+    slotCount: raw.slotCount,
+    slots: raw.slots.map((s): string | null => (s === null ? null : String(s))),
+    fragments,
+    version: DOC_VERSION,
+  };
+};
+
 function readStore(): SongDoc[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -248,7 +362,9 @@ export class Portfolio {
   }
 
   /**
-   * 从 JSON 文本导入单首作品（exportSong 的逆操作，复用同一存档结构与校验）。
+   * 从 JSON 文本导入单首作品（exportSong 的逆操作，复用同一存档结构）。
+   * 与读取本地存档不同，这里用严格校验：备份必须完整自洽，缺字段/越界/
+   * 引用悬空的文件整体拒绝，不做补缺修复。
    * id 与本机已有作品冲突时生成新 id 存为副本，绝不静默覆盖本机作品。
    * 文件无法识别时抛 ImportError，空间不足时抛 QuotaError。
    */
@@ -259,9 +375,8 @@ export class Portfolio {
     } catch {
       throw new ImportError('这个文件不是有效的作品备份');
     }
-    // 与 readStore 相同的逐条规范化：字段缺失/类型错误在这里被拦下或修复
-    const doc = normalizeDoc(parsed);
-    if (!doc) throw new ImportError('文件里没有能识别的河流之歌');
+    const doc = parseBackupDoc(parsed);
+    if (!doc) throw new ImportError('文件里没有完整的河流之歌，可能不是作品备份');
 
     const docs = readStore();
     let copied = false;
